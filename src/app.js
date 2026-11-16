@@ -1,20 +1,52 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import taskRoutes from "./routes/task.routes.js";
+import authRoutes from "./routes/authRoutes.js";
+import workspaceRoutes from "./routes/workspaceRoutes.js";
+import calendarRoutes from "./routes/calendarRoutes.js";
 import {
   errorHandler,
   notFoundHandler,
 } from "./middlewares/error.middleware.js";
 
 const app = express();
+const frontendOrigins = [
+  ...(process.env.FRONTEND_URL || "").split(","),
+  process.env.TASK_APP_URL,
+  "http://localhost:5173",
+  "https://cherry-plastics-neil-measurement.trycloudflare.com",
+]
+  .map((origin) => {
+    if (!origin || origin.trim() === "*") return null;
+    try {
+      return new URL(origin.trim()).origin;
+    } catch {
+      return null;
+    }
+  })
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      let requestedOrigin;
+      try {
+        requestedOrigin = new URL(origin).origin;
+      } catch {
+        return callback(null, false);
+      }
+      return callback(null, frontendOrigins.includes(requestedOrigin));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],
+    exposedHeaders: ["X-Cache"],
   }),
 );
 app.use(express.json());
+app.use(cookieParser());
 
 // Add this right above app.get('/health', ...) in src/app.js
 app.get("/", (req, res) => {
@@ -32,7 +64,11 @@ app.get("/health", (req, res) => {
 });
 
 // API Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/calendar", calendarRoutes);
 app.use("/api/v1/tasks", taskRoutes);
+app.use("/api/tasks", taskRoutes);
 
 // Error Middlewares
 app.use(notFoundHandler);
