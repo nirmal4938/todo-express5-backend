@@ -67,7 +67,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/calendar", calendarRoutes);
-app.use("/api/v1/tasks", taskRoutes);
+// app.use("/api/tasks", taskRoutes);
 app.use("/api/tasks", taskRoutes);
 
 // Error Middlewares
