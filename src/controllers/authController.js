@@ -32,6 +32,7 @@ const respondWithSession = async (
     success: true,
     data: {
       accessToken: signAccessToken(user),
+      refreshToken,
       user: {
         id: user.id,
         name: user.name,
@@ -235,7 +236,8 @@ export const refresh = async (req, res) => {
 
   try {
     // 1. Check cookie
-    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    const refreshToken =
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.body?.refreshToken;
     console.log("[REFRESH 1/6] Cookie present:", Boolean(refreshToken));
     if (!refreshToken) {
       return res.status(401).json({
@@ -347,6 +349,7 @@ export const refresh = async (req, res) => {
       success: true,
       data: {
         accessToken: signAccessToken(user),
+        refreshToken: nextRefreshToken,
         user: {
           id: user.id,
           name: user.name,
@@ -368,7 +371,8 @@ export const refresh = async (req, res) => {
 };
 
 export const logout = async (req, res) => {
-  const refreshToken = req.cookies[REFRESH_COOKIE_NAME];
+  const refreshToken =
+    req.cookies?.[REFRESH_COOKIE_NAME] || req.body?.refreshToken;
   if (refreshToken) {
     try {
       const claims = verifyRefreshToken(refreshToken);
