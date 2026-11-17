@@ -8,18 +8,6 @@ import {
   tokenLifetimeMilliseconds,
 } from "../config/auth.js";
 
-const isProductionOrHosted =
-  process.env.NODE_ENV === "production" ||
-  Boolean(process.env.RENDER) ||
-  (process.env.TASK_APP_URL || "").startsWith("https://");
-console.log("isProductionOrHosted", isProductionOrHosted);
-const refreshCookieAttributes = {
-  httpOnly: true,
-  secure: isProductionOrHosted,
-  sameSite: isProductionOrHosted ? "none" : "lax",
-  path: "/",
-};
-
 export const hashRefreshToken = (token) =>
   createHash("sha256").update(token).digest("hex");
 
@@ -42,11 +30,23 @@ export const verifyAccessToken = (token) =>
 export const verifyRefreshToken = (token) =>
   jwt.verify(token, REFRESH_TOKEN_SECRET, { algorithms: ["HS256"] });
 
+const getRefreshCookieBaseOptions = () => {
+  const isHosted =
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.RENDER) ||
+    (process.env.TASK_APP_URL || "").startsWith("https://");
+
+  return {
+    httpOnly: true,
+    secure: isHosted,
+    sameSite: isHosted ? "none" : "lax",
+    path: "/",
+  };
+};
+
 export const refreshCookieOptions = () => ({
-  ...refreshCookieAttributes,
+  ...getRefreshCookieBaseOptions(),
   maxAge: tokenLifetimeMilliseconds(REFRESH_TOKEN_TTL),
 });
 
-export const refreshCookieClearOptions = () => ({
-  ...refreshCookieAttributes,
-});
+export const refreshCookieClearOptions = () => getRefreshCookieBaseOptions();

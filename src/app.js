@@ -16,6 +16,7 @@ app.set("trust proxy", 1);
 const frontendOrigins = [
   ...(process.env.FRONTEND_URL || "").split(","),
   process.env.TASK_APP_URL,
+  "https://todo-react-frontend-psi.vercel.app",
   "http://localhost:5173",
   ,
 ]
