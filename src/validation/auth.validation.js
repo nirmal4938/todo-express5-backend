@@ -14,6 +14,24 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+export const forgotPasswordSchema = z.object({ email });
+
+const resetToken = z.string().regex(/^[a-f0-9]{64}$/i);
+const resetPassword = z
+  .string()
+  .min(8)
+  .max(128)
+  .regex(/[a-z]/, "Password must contain a lowercase letter")
+  .regex(/[A-Z]/, "Password must contain an uppercase letter")
+  .regex(/[0-9]/, "Password must contain a number");
+
+export const resetPasswordSchema = z.object({
+  token: resetToken,
+  password: resetPassword,
+});
+
+export const verifyResetTokenSchema = z.object({ token: resetToken });
+
 export const notificationSettingsSchema = z
   .object({
     phoneNumber: z

@@ -41,6 +41,16 @@ const userSchema = new mongoose.Schema(
       default: [],
       select: false,
     },
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     defaultWorkspaceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Workspace",

@@ -86,3 +86,33 @@ export const sendTaskEmail = async ({ task, user, leadTimeMinutes }) => {
   });
   return "SENT";
 };
+
+export const sendPasswordResetEmail = async ({ user, resetUrl }) => {
+  const mailTransport = getTransport();
+
+  if (!mailTransport) {
+    logNotificationEvent("notification.email.dry_run", {
+      recipient: user.email,
+      reason: "SMTP_HOST, SMTP_USER, or SMTP_PASS is not configured",
+      purpose: "password_reset",
+    });
+    return "SKIPPED_UNCONFIGURED";
+  }
+
+  const safeName = escapeHtml(user.name);
+  const safeResetUrl = escapeHtml(resetUrl);
+  const info = await mailTransport.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: user.email,
+    subject: "Reset your password",
+    text: `Hello ${user.name},\n\nUse this link to reset your password. It expires in 15 minutes:\n${resetUrl}\n\nIf you did not request a password reset, you can ignore this email.`,
+    html: `<!doctype html><html><body style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a"><main style="max-width:560px;margin:auto;padding:28px;border-radius:16px;background:#fff"><h1 style="font-size:24px">Reset your password</h1><p>Hello ${safeName},</p><p>We received a request to reset your password. This link expires in 15 minutes.</p><p style="margin-top:24px"><a href="${safeResetUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#3b66f5;color:#fff;text-decoration:none;font-weight:bold">Reset password</a></p><p style="font-size:13px;color:#64748b">If you did not request a password reset, you can ignore this email.</p></main></body></html>`,
+  });
+
+  logNotificationEvent("notification.email.sent", {
+    recipient: user.email,
+    messageId: info.messageId,
+    purpose: "password_reset",
+  });
+  return "SENT";
+};

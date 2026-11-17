@@ -10,7 +10,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "worker": "node src/workers/reminderWorker.js",
-    "migrate:legacy-tasks": "node src/scripts/migrateLegacyTasks.js"
+    "migrate:legacy-tasks": "node src/scripts/migrateLegacyTasks.js",
+    "test:auth": "node --test src/tests/passwordReset.test.js"
   },
   "keywords": [],
   "author": "",

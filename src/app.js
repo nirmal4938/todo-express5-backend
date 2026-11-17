@@ -5,17 +5,19 @@ import taskRoutes from "./routes/task.routes.js";
 import authRoutes from "./routes/authRoutes.js";
 import workspaceRoutes from "./routes/workspaceRoutes.js";
 import calendarRoutes from "./routes/calendarRoutes.js";
+import auditRoutes from "./routes/auditRoutes.js";
 import {
   errorHandler,
   notFoundHandler,
 } from "./middlewares/error.middleware.js";
 
 const app = express();
+app.set("trust proxy", 1);
 const frontendOrigins = [
   ...(process.env.FRONTEND_URL || "").split(","),
   process.env.TASK_APP_URL,
   "http://localhost:5173",
-  "https://cherry-plastics-neil-measurement.trycloudflare.com",
+  ,
 ]
   .map((origin) => {
     if (!origin || origin.trim() === "*") return null;
@@ -40,8 +42,13 @@ app.use(
       return callback(null, frontendOrigins.includes(requestedOrigin));
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Workspace-Id",
+      "X-Request-Id",
+    ],
     exposedHeaders: ["X-Cache"],
   }),
 );
@@ -67,6 +74,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/calendar", calendarRoutes);
+app.use("/api/audit-logs", auditRoutes);
 // app.use("/api/tasks", taskRoutes);
 app.use("/api/tasks", taskRoutes);
 

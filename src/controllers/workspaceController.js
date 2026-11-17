@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { User } from "../models/User.js";
 import { Workspace } from "../models/Workspace.js";
 import { invalidateTaskCache } from "../services/cache.service.js";
+import { recordAuditEvent } from "../services/auditService.js";
 
 const slugify = (name) =>
   name
@@ -44,6 +45,16 @@ export const createWorkspace = async (req, res) => {
     );
   }
 
+  recordAuditEvent({
+    req,
+    workspaceId: workspace._id,
+    actorRole: "OWNER",
+    action: "WORKSPACE_CREATED",
+    entityType: "WORKSPACE",
+    entityId: workspace._id,
+    entityTitle: workspace.name,
+    changes: [{ field: "name", oldValue: null, newValue: workspace.name }],
+  });
   res.status(201).json({ success: true, data: workspace });
 };
 
@@ -77,6 +88,14 @@ export const inviteMember = async (req, res) => {
       message: "User is already a workspace member",
     });
   }
+  recordAuditEvent({
+    req,
+    action: "MEMBER_INVITED",
+    entityType: "MEMBER",
+    entityId: user._id,
+    entityTitle: user.email,
+    changes: [{ field: "role", oldValue: null, newValue: req.body.role }],
+  });
   res.status(201).json({ success: true, data: workspace });
 };
 
@@ -98,8 +117,17 @@ export const changeMemberRole = async (req, res) => {
     });
   }
 
+  const oldRole = member.role;
   member.role = req.body.role;
   await workspace.save();
+  recordAuditEvent({
+    req,
+    action: "MEMBER_ROLE_UPDATED",
+    entityType: "MEMBER",
+    entityId: member.userId,
+    entityTitle: member.email || member.userId.toString(),
+    changes: [{ field: "role", oldValue: oldRole, newValue: member.role }],
+  });
   res.status(200).json({ success: true, data: workspace });
 };
 
@@ -124,6 +152,14 @@ export const removeMember = async (req, res) => {
 
   workspace.members.pull({ userId });
   await workspace.save();
+  recordAuditEvent({
+    req,
+    action: "MEMBER_REMOVED",
+    entityType: "MEMBER",
+    entityId: member.userId,
+    entityTitle: member.email || member.userId.toString(),
+    changes: [{ field: "role", oldValue: member.role, newValue: null }],
+  });
 
   const user = await User.findById(userId).select("defaultWorkspaceId");
   if (user?.defaultWorkspaceId?.equals(workspace._id)) {

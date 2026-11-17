@@ -1,12 +1,15 @@
 import bcrypt from "bcryptjs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { REFRESH_COOKIE_NAME } from "../config/auth.js";
 import { User } from "../models/User.js";
 import { Workspace } from "../models/Workspace.js";
 import { Task } from "../models/task.model.js";
 import { scheduleReminder } from "../queues/reminderQueue.js";
+import { sendPasswordResetEmail } from "../services/notifications/emailProvider.js";
+import { recordAuditEventForUserWorkspaces } from "../services/auditService.js";
 import {
   hashRefreshToken,
+  refreshCookieClearOptions,
   refreshCookieOptions,
   signAccessToken,
   signRefreshToken,
@@ -94,7 +97,6 @@ export const register = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  console.log("hi");
   const user = await User.findOne({ email: req.body.email }).select(
     "+passwordHash +refreshTokens",
   );
@@ -109,6 +111,123 @@ export const login = async (req, res) => {
   }
 
   await respondWithSession(user, res);
+};
+
+const passwordResetResponse = {
+  success: true,
+  message:
+    "If an account with that email exists, a password reset link has been sent.",
+};
+
+const hashPasswordResetToken = (token) =>
+  createHash("sha256").update(token).digest("hex");
+
+export const forgotPassword = async (req, res) => {
+  const user = await User.findOne({ email: req.body.email });
+  let devResetUrl;
+
+  if (user) {
+    const rawToken = randomBytes(32).toString("hex");
+    const resetUrl = `${process.env.TASK_APP_URL || "http://localhost:5173"}/reset-password?token=${rawToken}`;
+    user.passwordResetTokenHash = hashPasswordResetToken(rawToken);
+    user.passwordResetExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+
+    if (!process.env.SMTP_HOST) {
+      devResetUrl = resetUrl;
+      console.info(`Password reset link for ${user.email}: ${resetUrl}`);
+    }
+
+    try {
+      await sendPasswordResetEmail({ user, resetUrl });
+    } catch (error) {
+      console.error(`Password reset email delivery failed: ${error.message}`);
+    }
+  }
+
+  res.status(200).json({
+    ...passwordResetResponse,
+    ...(process.env.NODE_ENV !== "production" &&
+    !process.env.SMTP_HOST &&
+    devResetUrl
+      ? { devResetUrl }
+      : {}),
+  });
+};
+
+export const verifyPasswordResetToken = async (req, res) => {
+  const passwordResetTokenHash = hashPasswordResetToken(req.query.token);
+  const user = await User.findOne({
+    passwordResetTokenHash,
+    passwordResetExpiresAt: { $gt: new Date() },
+  });
+
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      message: "Reset link is invalid or has expired",
+    });
+  }
+
+  res.status(200).json({ success: true, valid: true });
+};
+
+export const resetPassword = async (req, res) => {
+  const passwordResetTokenHash = hashPasswordResetToken(req.body.token);
+  const user = await User.findOne({
+    passwordResetTokenHash,
+    passwordResetExpiresAt: { $gt: new Date() },
+  }).select("+passwordHash +refreshTokens");
+
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      message: "Password reset token is invalid or has expired",
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(req.body.password, 12);
+  const result = await User.updateOne(
+    {
+      _id: user._id,
+      passwordResetTokenHash,
+      passwordResetExpiresAt: { $gt: new Date() },
+    },
+    {
+      $set: {
+        passwordHash,
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+        refreshTokens: [],
+      },
+    },
+  );
+
+  if (result.modifiedCount !== 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Password reset token is invalid or has expired",
+    });
+  }
+
+  recordAuditEventForUserWorkspaces({
+    req,
+    actorId: user._id,
+    actorSnapshot: {
+      name: user.name,
+      email: user.email,
+    },
+    action: "PASSWORD_RESET_COMPLETED",
+    entityType: "AUTH",
+    entityId: user._id,
+    entityTitle: user.email,
+  });
+  res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
+  res.status(200).json({
+    success: true,
+    message:
+      "Password has been reset successfully. Please log in with your new password.",
+  });
 };
 
 export const refresh = async (req, res) => {
@@ -132,7 +251,7 @@ export const refresh = async (req, res) => {
       console.log("[REFRESH 2/6] Token verified for user:", claims.sub);
     } catch (jwtErr) {
       console.error("[REFRESH 2/6] JWT verification failed:", jwtErr.message);
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
       return res.status(401).json({
         success: false,
         message: "Invalid or expired refresh token",
@@ -141,7 +260,7 @@ export const refresh = async (req, res) => {
 
     if (claims.type !== "refresh" || !claims.sub) {
       console.warn("[REFRESH 2/6] Invalid token claims:", claims);
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token",
@@ -152,7 +271,7 @@ export const refresh = async (req, res) => {
     const user = await User.findById(claims.sub).select("+refreshTokens");
     console.log("[REFRESH 3/6] User found:", Boolean(user));
     if (!user) {
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token",
@@ -169,7 +288,7 @@ export const refresh = async (req, res) => {
         user._id,
       );
       await User.updateOne({ _id: user._id }, { $set: { refreshTokens: [] } });
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
       return res.status(401).json({
         success: false,
         message: "Refresh token reuse detected; all sessions were revoked",
@@ -213,7 +332,7 @@ export const refresh = async (req, res) => {
         "[REFRESH 5/6] Concurrent rotation race detected! Revoking all sessions.",
       );
       await User.updateOne({ _id: user._id }, { $set: { refreshTokens: [] } });
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
       return res.status(401).json({
         success: false,
         message: "Refresh token reuse detected; all sessions were revoked",
@@ -264,7 +383,7 @@ export const logout = async (req, res) => {
     }
   }
 
-  res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
+  res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieClearOptions());
   res.status(200).json({ success: true, message: "Logged out successfully" });
 };
 

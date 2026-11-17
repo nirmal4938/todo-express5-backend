@@ -36,6 +36,7 @@ Open the [zoomable SVG diagram](./docs/architecture.svg) or inspect its [Mermaid
 - Workspace membership is resolved from `x-workspace-id` (or the user's default workspace if the header is absent). Invalid workspace IDs return `400`; missing membership or disallowed roles return `403`.
 - Access JWTs default to 15 minutes and refresh JWTs to 7 days. The refresh token is an `HttpOnly`, `Secure`, `SameSite=Strict` cookie scoped to `/api/auth`; the browser client keeps the access token in memory and serializes concurrent refresh attempts through one shared promise.
 - Refresh-token hashes are stored server-side. Refresh rotates the cookie/token hash; reusing a rotated/unknown token revokes all refresh sessions for that account.
+- Password reset links contain a single-use 32-byte token; only its SHA-256 hash is stored, the link expires after 15 minutes, and successful resets revoke every refresh session. Forgot/reset requests are each limited to 5 per 15 minutes per IP.
 - Registration requires a 12–128 character password, hashes it with bcrypt, and provisions a personal `"<Name>'s Workspace"` with the user as `OWNER`.
 - Login is limited to 10 attempts per 15 minutes per rate-limiter key. The API enables credentialed CORS for configured `FRONTEND_URL` origins and exposes `X-Cache`.
 
@@ -84,6 +85,9 @@ Successful JSON responses generally use `{ "success": true, "data": ... }`. Zod 
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/register` | Public; login rate limit does not apply | Body: `{ name, email, password }`; returns `201` session `{ accessToken, user: { id, name, email, defaultWorkspaceId } }` and sets refresh cookie. Duplicate email: `409`. |
 | `POST` | `/api/auth/login` | Public; 10 attempts / 15 min | Body: `{ email, password }`; returns session and refresh cookie. Invalid credentials: `401`; rate limit: `429`. |
+| `POST` | `/api/auth/forgot-password` | Public; 5 attempts / 15 min | Body: `{ email }`; always returns the same `200` response to prevent account enumeration. In non-production without `SMTP_HOST`, includes a `devResetUrl` for local testing. |
+| `GET` | `/api/auth/reset-password/verify?token=...` | Public | Optional pre-check; returns `{ success: true, valid: true }` for an unexpired link, otherwise `400`. |
+| `POST` | `/api/auth/reset-password` | Public; 5 attempts / 15 min | Body: `{ token, password }`; password must be 8–128 characters with uppercase, lowercase, and numeric characters. Success clears the reset token and all refresh sessions. |
 | `POST` | `/api/auth/refresh` | Refresh cookie | Rotates refresh cookie and returns a new access token and user summary. Invalid/reused token: `401`; reuse revokes all refresh sessions for that user. |
 | `POST` | `/api/auth/logout` | Refresh cookie optional | Revokes the presented refresh token when valid and clears the cookie. |
 | `PATCH` | `/api/auth/notifications` | Authenticated | Optional `phoneNumber` and/or `notificationPreferences` (`email`, `whatsapp`, `mobileAlarm`, `leadTimeMinutes`). WhatsApp requires an E.164 phone number. Returns the saved settings and reschedules eligible tasks. There is no GET preferences endpoint. |
